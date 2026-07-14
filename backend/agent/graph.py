@@ -3,6 +3,7 @@ from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 from backend.agent.state import AgentState
 from backend.agent.router import intent_route
+from backend.agent.nodes.react_agent import react_agent, execute_tools
 from backend.agent.nodes.collect import collect_info
 from backend.agent.nodes.diagnose import check_confidence
 from backend.agent.nodes.clarify import clarify
@@ -14,38 +15,33 @@ from backend.config import CONFIDENCE_THRESHOLD, MAX_CLARIFY_ROUNDS
 # === 路由函数 ===
 
 def route_after_intent(state: AgentState) -> str:
-    """意图路由后的分支。"""
+    """意图路由后的分支。diagnose 和 knowledge 都进入 ReAct 循环。"""
     intent = state.get("intent", "chitchat")
-    if intent == "diagnose":
-        return "collect_info"
-    elif intent == "knowledge":
-        return "knowledge_answer"
+    if intent in ("diagnose", "knowledge"):
+        return "react_agent"
     else:
         return "chitchat_end"
 
 
-def route_after_confidence(state: AgentState) -> str:
-    """置信度判断后的分支。"""
-    confidence = state.get("confidence", 0)
-    clarify_count = state.get("clarify_count", 0)
+MAX_REACT_LOOPS = 8  # 防止死循环
 
-    if confidence >= CONFIDENCE_THRESHOLD:
-        return "verify_claim"
-    elif clarify_count < MAX_CLARIFY_ROUNDS:
-        return "clarify"
+
+def route_after_react(state: AgentState) -> str:
+    """ReAct Agent 输出后的路由：继续执行工具 or 结束。"""
+    loops = state.get("react_loops", 0)
+
+    if loops >= MAX_REACT_LOOPS:
+        return "force_end"
+
+    if state.get("pending_action"):
+        return "execute_tools"
     else:
-        # 追问已满，降级：直接生成方案，标记不确定性
-        state["final_diagnosis"] = {
-            "disease": "未能确诊",
-            "confidence": confidence,
-            "reasoning": f"追问 {clarify_count} 轮后仍无法确诊，基于现有信息给出建议"
-        }
-        return "verify_claim"
+        return "end"
 
 
-def route_after_clarify(state: AgentState) -> str:
-    """追问后回到信息收集（等待用户下一轮输入）。"""
-    return "collect_info"
+def route_after_tools(state: AgentState) -> str:
+    """工具执行后回到 ReAct Agent 继续推理。"""
+    return "react_agent"
 
 
 # === 状态图构建 ===
@@ -56,56 +52,39 @@ def build_graph() -> StateGraph:
     Returns:
         编译后的 StateGraph，带 checkpoint 支持多轮对话恢复
     """
-    # 创建图
     workflow = StateGraph(AgentState)
 
-    # 添加节点
+    # ── 添加节点 ──
     workflow.add_node("intent_route", intent_route)
-    workflow.add_node("collect_info", collect_info)
-    workflow.add_node("check_confidence", check_confidence)
-    workflow.add_node("clarify", clarify)
-    workflow.add_node("verify_claim", verify_claim_node)
-    workflow.add_node("generate_plan", generate_plan)
-    workflow.add_node("knowledge_answer", knowledge_answer)
+    workflow.add_node("react_agent", react_agent)
+    workflow.add_node("execute_tools", execute_tools)
 
     # 入口
     workflow.set_entry_point("intent_route")
 
-    # 边：意图路由
+    # 意图路由
     workflow.add_conditional_edges(
         "intent_route",
         route_after_intent,
         {
-            "collect_info": "collect_info",
-            "knowledge_answer": "knowledge_answer",
+            "react_agent": "react_agent",
             "chitchat_end": END,
         }
     )
 
-    # 边：信息收集 → 置信度判断
-    workflow.add_edge("collect_info", "check_confidence")
-
-    # 边：置信度判断 → 验证 / 追问
+    # ReAct 循环
     workflow.add_conditional_edges(
-        "check_confidence",
-        route_after_confidence,
+        "react_agent",
+        route_after_react,
         {
-            "verify_claim": "verify_claim",
-            "clarify": "clarify",
+            "execute_tools": "execute_tools",
+            "end": END,
+            "force_end": END,
         }
     )
 
-    # 边：追问 → 回到信息收集
-    workflow.add_edge("clarify", "collect_info")
-
-    # 边：验证 → 方案生成
-    workflow.add_edge("verify_claim", "generate_plan")
-
-    # 边：方案生成 → 结束
-    workflow.add_edge("generate_plan", END)
-
-    # 边：知识回答 → 结束
-    workflow.add_edge("knowledge_answer", END)
+    # 工具执行后回到 ReAct Agent（循环）
+    workflow.add_edge("execute_tools", "react_agent")
 
     # 编译（带内存 checkpoint）
     memory = MemorySaver()

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>知识库管理 — 水稻QA系统</title>
+<title>知识库管理 - 水稻Agent</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif; background: #f5f5f5; color: #333; max-width: 700px; margin: 0 auto; padding: 36px 20px 60px; }
@@ -19,13 +19,12 @@ h1 { font-size: 22px; margin-bottom: 6px; color: #2d6a1e; }
 .upload-area:hover { border-color: #2d6a1e; background: #f9faf9; }
 .upload-area p { color: #999; font-size: 14px; }
 .upload-area .hint { font-size: 11px; color: #bbb; margin-top: 8px; }
-#fileInput { display: none; }
-#uploadBtn { background: #2d6a1e; color: white; border: none; padding: 10px 28px; border-radius: 8px; font-size: 14px; cursor: pointer; margin-top: 12px; display: none; }
-#uploadBtn:hover { background: #1b4d10; }
-#uploadBtn:disabled { background: #aaa; cursor: not-allowed; }
-.file-list { list-style: none; }
-.file-list li { padding: 8px 0; border-bottom: 1px solid #f5f5f5; font-size: 13px; color: #555; }
-.file-list li:last-child { border-bottom: none; }
+#fileInput, #folderInput { display: none; }
+#uploadBtn, #batchUploadBtn { background: #2d6a1e; color: white; border: none; padding: 10px 28px; border-radius: 8px; font-size: 14px; cursor: pointer; margin-top: 12px; display: none; }
+#uploadBtn:hover, #batchUploadBtn:hover { background: #1b4d10; }
+#uploadBtn:disabled, #batchUploadBtn:disabled { background: #aaa; cursor: not-allowed; }
+#batchBtn { background: #1565c0; color: white; border: none; padding: 10px 28px; border-radius: 8px; font-size: 14px; cursor: pointer; margin-top: 12px; }
+#batchBtn:hover { background: #0d47a1; }
 .status { padding: 10px 16px; border-radius: 8px; font-size: 13px; margin-top: 12px; display: none; }
 .status.success { background: #e8f5e9; color: #2d6a1e; display: block; }
 .status.error { background: #ffebee; color: #c62828; display: block; }
@@ -33,6 +32,19 @@ h1 { font-size: 22px; margin-bottom: 6px; color: #2d6a1e; }
 .back-link { display: inline-block; margin-bottom: 20px; color: #2d6a1e; text-decoration: none; font-size: 13px; }
 .back-link:hover { text-decoration: underline; }
 .empty { color: #ccc; font-size: 13px; text-align: center; padding: 14px; }
+.file-group { margin-bottom: 12px; }
+.file-group-header { font-weight: bold; font-size: 14px; color: #444; padding: 6px 0; border-bottom: 1px solid #eee; margin-bottom: 6px; }
+.file-group-header .group-count { font-weight: normal; color: #999; font-size: 12px; margin-left: 8px; }
+.file-group-header.collapsible { cursor: pointer; user-select: none; }
+.file-group-header.collapsible:hover { color: #2d6a1e; }
+.toggle-icon { float: right; font-size: 10px; color: #aaa; margin-top: 2px; }
+.file-sublist { list-style: none; padding: 0; margin: 0; }
+.file-sublist li { padding: 4px 0; font-size: 12px; color: #666; border-bottom: 1px solid #f5f5f5; word-break: break-all; }
+#irriList { display: none; }
+.batch-section { margin-top: 16px; padding-top: 14px; border-top: 1px solid #eee; }
+#batchProgress { margin-top: 8px; font-size: 12px; color: #888; max-height: 120px; overflow-y: auto; }
+#batchProgress .ok { color: #2d6a1e; }
+#batchProgress .fail { color: #c62828; }
 </style>
 </head>
 <body>
@@ -50,7 +62,7 @@ h1 { font-size: 22px; margin-bottom: 6px; color: #2d6a1e; }
 </div>
 
 <div class="section">
-  <h2>📤 上传文档</h2>
+  <h2>📤 单文件上传</h2>
   <div class="upload-area" onclick="document.getElementById('fileInput').click()">
     <p>📄 点击选择文件或拖拽到此处</p>
     <p class="hint">支持 .pdf / .md / .txt 格式</p>
@@ -59,27 +71,71 @@ h1 { font-size: 22px; margin-bottom: 6px; color: #2d6a1e; }
   <input type="file" id="fileInput" accept=".pdf,.md,.txt" onchange="onFileSelected(event)">
   <button id="uploadBtn" onclick="upload()">上传并入库</button>
   <div class="status" id="status"></div>
+
+  <div class="batch-section">
+    <h3 style="font-size:13px;color:#888;margin-bottom:10px;">📂 批量导入文件夹（选择包含 .txt / .md / .pdf 的目录）</h3>
+    <input type="file" id="folderInput" webkitdirectory directory multiple onchange="onFolderSelected(event)">
+    <button id="batchBtn" onclick="document.getElementById('folderInput').click()">选择文件夹</button>
+    <span id="folderSelected" style="margin-left:12px;font-size:13px;color:#555;"></span>
+    <button id="batchUploadBtn" onclick="batchUpload()">导入全部到知识库</button>
+    <div id="batchProgress"></div>
+  </div>
 </div>
 
 <script>
 let selectedFile = null;
+let batchFiles = [];
 
 async function loadStats() {
   try {
     const res = await fetch('/admin/stats');
     const data = await res.json();
-    document.getElementById('chunksCount').textContent = data.total_chunks;
-    document.getElementById('docsCount').textContent = data.document_files.length;
+    document.getElementById('chunksCount').textContent = data.total_chunks || 0;
+    const files = data.document_files || [];
+    document.getElementById('docsCount').textContent = files.length;
+
     const list = document.getElementById('fileList');
-    if (data.document_files.length === 0) {
+    if (files.length === 0) {
       list.innerHTML = '<div class="empty">暂无文档，请上传第一个知识文档</div>';
-    } else {
-      list.innerHTML = data.document_files.map(f => '<li>' + f + '</li>').join('');
+      return;
     }
+
+    const local = files.filter(f => !f.startsWith('IRRI:'));
+    const irri = files.filter(f => f.startsWith('IRRI:'));
+
+    let html = '';
+
+    // 本地文档 (始终展开)
+    if (local.length) {
+      html += '<div class="file-group"><div class="file-group-header">📁 本地文档 <span class="group-count">' + local.length + ' 个</span></div><ul class="file-sublist">';
+      html += local.map(f => '<li>' + f + '</li>').join('');
+      html += '</ul></div>';
+    }
+
+    // IRRI (可折叠)
+    if (irri.length) {
+      html += '<div class="file-group"><div class="file-group-header collapsible" onclick="toggleIRRI()">📁 IRRI 知识库 <span class="group-count">' + irri.length + ' 篇</span><span class="toggle-icon">▼</span></div><ul class="file-sublist" id="irriList">';
+      html += irri.map(f => '<li>' + f.replace('IRRI: ', '') + '</li>').join('');
+      html += '</ul></div>';
+    }
+
+    list.innerHTML = html;
   } catch (e) {
-    document.getElementById('chunksCount').textContent = '⚠';
-    document.getElementById('docsCount').textContent = '⚠';
-    document.getElementById('fileList').innerHTML = '<div class="empty">无法连接服务，请确认后端已启动</div>';
+    document.getElementById('chunksCount').textContent = '?';
+    document.getElementById('docsCount').textContent = '?';
+    document.getElementById('fileList').innerHTML = '<div class="empty">无法连接服务，请确认后端已启动（http://localhost:8000）</div>';
+  }
+}
+
+function toggleIRRI() {
+  const el = document.getElementById('irriList');
+  const icon = document.querySelector('.toggle-icon');
+  if (el.style.display === 'none') {
+    el.style.display = 'block';
+    icon.textContent = '▼';
+  } else {
+    el.style.display = 'none';
+    icon.textContent = '▶';
   }
 }
 
@@ -97,7 +153,7 @@ async function upload() {
   const btn = document.getElementById('uploadBtn');
   const status = document.getElementById('status');
   btn.disabled = true;
-  btn.textContent = '处理中…';
+  btn.textContent = '处理中...';
   status.className = 'status';
   status.textContent = '';
 
@@ -109,7 +165,7 @@ async function upload() {
     const data = await res.json();
     if (data.status === 'ok') {
       status.className = 'status success';
-      status.textContent = '✅ 上传成功！已创建 ' + data.chunks_created + ' 个向量条目';
+      status.textContent = '✅ 上传成功！已创建 ' + data.chunks + ' 个向量条目';
       loadStats();
     } else {
       status.className = 'status error';
@@ -125,6 +181,60 @@ async function upload() {
   document.getElementById('fileInput').value = '';
   document.getElementById('selectedFile').textContent = '';
   document.getElementById('uploadBtn').style.display = 'none';
+}
+
+function onFolderSelected(e) {
+  batchFiles = Array.from(e.target.files).filter(f => /\.(txt|md|pdf)$/i.test(f.name));
+  document.getElementById('folderSelected').textContent = '已选择 ' + batchFiles.length + ' 个文件';
+  document.getElementById('batchUploadBtn').style.display = batchFiles.length ? 'inline-block' : 'none';
+}
+
+async function batchUpload() {
+  if (!batchFiles.length) return;
+  const btn = document.getElementById('batchUploadBtn');
+  const progress = document.getElementById('batchProgress');
+  btn.disabled = true;
+  let ok = 0, fail = 0;
+  progress.innerHTML = '';
+
+  for (let i = 0; i < batchFiles.length; i++) {
+    const f = batchFiles[i];
+    const line = document.createElement('div');
+    line.textContent = '⏳ ' + (i+1) + '/' + batchFiles.length + ' ' + f.name;
+    progress.appendChild(line);
+
+    const form = new FormData();
+    form.append('file', f);
+    try {
+      const res = await fetch('/admin/upload', { method: 'POST', body: form });
+      const data = await res.json();
+      if (data.status === 'ok') {
+        line.textContent = '✅ ' + (i+1) + '/' + batchFiles.length + ' ' + f.name + ' (' + data.chunks + ' chunks)';
+        line.className = 'ok';
+        ok++;
+      } else {
+        line.textContent = '❌ ' + (i+1) + '/' + batchFiles.length + ' ' + f.name + ': ' + (data.detail || 'error');
+        line.className = 'fail';
+        fail++;
+      }
+    } catch(e) {
+      line.textContent = '❌ ' + (i+1) + '/' + batchFiles.length + ' ' + f.name + ': network error';
+      line.className = 'fail';
+      fail++;
+    }
+  }
+
+  const summary = document.createElement('div');
+  summary.style.marginTop = '8px';
+  summary.style.fontWeight = 'bold';
+  summary.textContent = '导入完成: ' + ok + ' 成功, ' + fail + ' 失败';
+  progress.appendChild(summary);
+
+  loadStats();
+  btn.disabled = false;
+  batchFiles = [];
+  document.getElementById('folderSelected').textContent = '';
+  document.getElementById('batchUploadBtn').style.display = 'none';
 }
 
 loadStats();

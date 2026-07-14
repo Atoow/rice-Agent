@@ -52,6 +52,11 @@ class AgentState(TypedDict):
     node_events: list[dict]           # 推送给前端的节点事件
     # 每项格式: {"node": str, "status": "start"|"complete", "data": dict}
 
+    # ReAct 循环控制
+    pending_action: dict | None       # 待执行的工具 {"tool": str, "tool_input": str}
+    pending_observation: str          # 工具执行结果（Observation），供下一轮 react_agent 消费
+    react_loops: int                  # ReAct 循环计数，防止死循环
+
 
 def initial_state() -> AgentState:
     """创建初始空状态。"""
@@ -67,4 +72,7 @@ def initial_state() -> AgentState:
         sources=[],
         verification_result=None,
         node_events=[],
+        pending_action=None,
+        pending_observation="",
+        react_loops=0,
     )

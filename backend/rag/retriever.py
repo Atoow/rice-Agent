@@ -164,8 +164,10 @@ class Retriever:
     def get_collection_stats(self) -> dict:
         count = len(self._documents)
         dim = self._vectors.shape[1] if self._vectors is not None and len(self._vectors) > 0 else 0
+        unique_sources = sorted(set(self._sources)) if self._sources else []
         return {
             "total_chunks": count,
             "collection_name": self.collection_name,
             "vector_dim": dim,
+            "document_files": unique_sources,
         }

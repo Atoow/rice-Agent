@@ -16,6 +16,11 @@ class OllamaEmbedding:
         return response["embeddings"][0]
 
     def embed_batch(self, texts: list[str]) -> list[list[float]]:
-        """批量将多段文本转为向量。"""
-        response = self.client.embed(model=self.model, input=texts)
-        return response["embeddings"]
+        """批量将多段文本转为向量。自动分批避免 Ollama tokenize 服务限制。"""
+        batch_size = 50
+        all_embeddings = []
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i:i + batch_size]
+            response = self.client.embed(model=self.model, input=batch)
+            all_embeddings.extend(response["embeddings"])
+        return all_embeddings

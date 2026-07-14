@@ -44,7 +44,10 @@ body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; backg
 <body>
 
 <div class="main">
-  <div class="header">🌾 水稻种植智能 Agent <span>v2.0 — LangGraph · 知识图谱推理</span></div>
+  <div class="header">
+  🌾 水稻种植智能 Agent <span>v2.0 — LangGraph · 知识图谱推理</span>
+  <a href="/admin" style="float:right;color:#fff;font-size:0.8rem;text-decoration:none;opacity:0.85;">⚙ 知识库管理</a>
+</div>
   <div class="chat-box" id="chatBox"></div>
   <div class="input-area">
     <input type="text" id="questionInput" placeholder="描述水稻症状或提问种植知识…" onkeydown="if(event.key==='Enter')send()">

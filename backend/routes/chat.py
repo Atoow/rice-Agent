@@ -52,8 +52,12 @@ def _extract_final_answer(messages: list) -> str:
     """从 messages 列表中提取最终答案。"""
     for msg in reversed(messages):
         d = _as_dict(msg)
-        if d.get("node_type") in ("generate_plan", "knowledge_answer"):
-            return d.get("content", "")
+        if d.get("node_type") in ("generate_plan", "knowledge_answer", "react_agent"):
+            content = d.get("content", "")
+            # 跳过 ReAct 中间动作（Action/Thought 格式）
+            if content.startswith("Thought:") or content.startswith("Action:"):
+                continue
+            return content
     return ""
 
 

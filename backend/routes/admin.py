@@ -1,6 +1,7 @@
 """管理后台路由 —— 文档上传 + 统计查询。"""
 import os
 from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi.responses import RedirectResponse
 from backend.rag.loader import DocumentLoader
 from backend.rag.retriever import Retriever
 
@@ -15,6 +16,12 @@ def init_admin(retriever: Retriever, upload_dir: str):
     global _retriever, UPLOAD_DIR
     _retriever = retriever
     UPLOAD_DIR = upload_dir
+
+
+@router.get("/", include_in_schema=False)
+@router.get("", include_in_schema=False)
+async def admin_page():
+    return RedirectResponse(url="/admin.html")
 
 
 @router.get("/stats")
