@@ -6,6 +6,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.responses import RedirectResponse
 from backend.config import DATABASE_URL
 from backend.rag.embedding import OllamaEmbedding
 from backend.rag.retriever import Retriever
@@ -48,13 +49,18 @@ init_admin(retriever, doc_dir)
 init_db()
 print(f"SQLite 数据库初始化完成: {DATABASE_URL}")
 
+@app.get("/admin", include_in_schema=False)
+async def admin_redirect():
+    return RedirectResponse(url="/admin.html")
+
 # === 路由 ===
 app.include_router(chat_router)
 app.include_router(admin_router)
 
-# === 静态文件 ===
+# === 静态文件 (必须放在路由之后，否则覆盖 API) ===
 FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend")
 if os.path.exists(FRONTEND_DIR):
+    # 根路径挂载，API 路由优先匹配，未命中则回退到静态文件
     app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")
     print(f"前端页面已挂载: {FRONTEND_DIR}")
 
