@@ -68,6 +68,58 @@
 
 ---
 
+## 🏗 部署架构
+
+本项目支持两种部署模式，分别适用于开发研究和生产环境。
+
+### 本地开发模式（当前）
+
+```
+用户浏览器 ──→ FastAPI (localhost:8000) ──→ Ollama 本地推理 (qwen2.5:3b)
+                          │                      │
+                          │                      └── Embedding (dmeta-embedding-zh)
+                          │
+                          ├── Neo4j (Docker, localhost:7687)
+                          └── Numpy 向量库 (本地磁盘持久化)
+```
+
+- **零 API 费用**：LLM 推理和 Embedding 全部本地完成
+- **数据安全**：所有数据（图谱、向量、文档）存于本地，不经过外部服务
+- **适合**：学术研究、快速迭代、毕设/答辩演示
+
+### 云端部署架构（生产级扩展）
+
+```
+多用户浏览器 ──→ Nginx 负载均衡 ──→ FastAPI × N (K8s / Docker Compose)
+                                        │
+                    ┌───────────────────┼───────────────────┐
+                    │                   │                   │
+              DeepSeek API         Redis/Postgres       Neo4j AuraDB
+            (取代 Ollama)     (取代 MemorySaver)    (云端图数据库)
+                    │                   │                   │
+                    └───────────────────┴───────────────────┘
+                                    │
+                            Chroma / Pinecone
+                         (云端向量库，取代 Numpy)
+```
+
+**只需修改 `.env` 即可从本地切换到云端**：
+
+| 组件 | 本地 | 云端 | 环境变量 |
+|------|------|------|----------|
+| LLM | Ollama qwen2.5:3b | DeepSeek / 通义千问 / GPT-4o | `LLM_PROVIDER=deepseek` |
+| 向量库 | Numpy 本地 | Chroma / Pinecone | 替换 `Retriever` 实现 |
+| 图谱 | Docker Neo4j | Neo4j AuraDB | `NEO4J_URI`, `NEO4J_PASSWORD` |
+| 检查点 | MemorySaver | PostgresSaver | `langgraph checkpoint postgres` |
+
+**扩展能力**：
+
+- LangGraph 的 `checkpoint` 机制天然解耦状态与计算，换成 Postgres/Redis 后端即可支持多用户会话隔离
+- 所有 Agent 节点是无状态函数，水平扩展只需增加 FastAPI 实例数
+- 追问机制基于 `interrupt()` + `Command(resume=...)`，会话状态持久化在 checkpointer 中
+
+---
+
 ## ✨ 核心特性
 
 ### 智能诊断
