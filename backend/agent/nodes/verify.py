@@ -21,6 +21,8 @@ async def verify_claim_node(state: AgentState) -> AgentState:
                 "control": ""
             })
             if result.get("valid"):
+                # 使用副本修改，避免污染 state 中的原始数据
+                disease = disease.copy()
                 disease["confidence"] = min(disease.get("confidence", 0.5) + 0.15, 1.0)
             verification_results.append(result)
 

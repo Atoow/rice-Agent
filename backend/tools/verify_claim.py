@@ -1,17 +1,6 @@
 """知识验证工具 —— 验证 LLM 输出的病害-症状-防治三元组是否在图谱中成立。"""
 from langchain_core.tools import tool
-from neo4j import GraphDatabase
-from backend.config import NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD
-
-# 模块级单例
-_driver = None
-
-
-def _get_driver():
-    global _driver
-    if _driver is None:
-        _driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
-    return _driver
+from backend.kg.driver import get_driver
 
 
 @tool
@@ -26,7 +15,14 @@ def verify_claim(disease: str, symptom: str = "", control: str = "") -> dict:
     Returns:
         {valid: bool, evidence: [{source_type, match, path}]}
     """
-    driver = _get_driver()
+    driver = get_driver()
+    if driver is None:
+        return {"valid": False, "evidence": [{
+            "source_type": "graph",
+            "match": "driver_unavailable",
+            "path": "Neo4j 未连接"
+        }]}
+
     evidence = []
     all_valid = True
 
@@ -65,7 +61,9 @@ def verify_claim(disease: str, symptom: str = "", control: str = "") -> dict:
                 evidence.append({
                     "source_type": "graph",
                     "match": "symptom_disease_link",
-                    "path": f"Symptom({sym_records[0]['s.name']}) -> Disease({sym_records[0]['d.name']}) weight={sym_records[0]['r.weight']}"
+                    "path": f"Symptom({sym_records[0]['s.name']}) -> "
+                            f"Disease({sym_records[0]['d.name']}) "
+                            f"weight={sym_records[0]['r.weight']}"
                 })
             else:
                 all_valid = False
@@ -88,7 +86,8 @@ def verify_claim(disease: str, symptom: str = "", control: str = "") -> dict:
                 evidence.append({
                     "source_type": "graph",
                     "match": "control_disease_link",
-                    "path": f"Control({ctrl_records[0]['c.name']}) -> Disease({ctrl_records[0]['d.name']})"
+                    "path": f"Control({ctrl_records[0]['c.name']}) -> "
+                            f"Disease({ctrl_records[0]['d.name']})"
                 })
             else:
                 all_valid = False

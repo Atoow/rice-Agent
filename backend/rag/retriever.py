@@ -2,11 +2,19 @@
 
 基于 numpy 实现余弦相似度检索，替代 Chroma（避免 C 扩展兼容性问题）。
 向量数据持久化到磁盘，重启不丢失。
+
+线程安全：add_documents / _save 操作使用锁保护。
 """
-import os, json
+import json
+import logging
+import os
+import threading
+
 import numpy as np
 from backend.config import CHROMA_PERSIST_DIR, CHROMA_COLLECTION_NAME, RETRIEVAL_TOP_K, MIN_RELEVANCE_SCORE
 from backend.rag.embedding import OllamaEmbedding
+
+logger = logging.getLogger(__name__)
 
 
 class Retriever:
@@ -21,6 +29,7 @@ class Retriever:
         self.embedding = embedding
         self.persist_dir = persist_dir
         self.collection_name = collection_name
+        self._lock = threading.Lock()
 
         os.makedirs(persist_dir, exist_ok=True)
 
@@ -40,6 +49,7 @@ class Retriever:
         return os.path.join(self.persist_dir, f"{self.collection_name}_meta.json")
 
     def _save(self):
+        """写入磁盘（调用方需持有 _lock）。"""
         if self._vectors is not None and len(self._vectors) > 0:
             np.save(self._vectors_path(), self._vectors)
         meta = {
@@ -64,7 +74,9 @@ class Retriever:
     # === 文档入库 ===
 
     def _remove_by_source(self, source: str) -> int:
-        """删除指定来源文件的所有向量条目，返回删除数量。"""
+        """删除指定来源文件的所有向量条目，返回删除数量。
+        调用方需持有 _lock。
+        """
         if self._vectors is None or len(self._vectors) == 0:
             return 0
 
@@ -80,9 +92,10 @@ class Retriever:
         self._save()
         return removed
 
-
     def add_documents(self, chunks: list[dict]) -> int:
         """将文档块向量化并存入本地。重复上传同一文件会先清理旧数据。
+
+        线程安全：使用锁保护写操作。
 
         Args:
             chunks: [{"content": "文本", "source": "文件名", "index": 0}, ...]
@@ -93,35 +106,38 @@ class Retriever:
         if not chunks:
             return 0
 
-        # 去重：先删除同一来源的旧条目
-        sources_seen = set()
-        for chunk in chunks:
-            src = chunk.get("source", "")
-            if src and src not in sources_seen:
-                sources_seen.add(src)
-                removed = self._remove_by_source(src)
-                if removed:
-                    print(f"已清理旧数据: {src} ({removed} 条)")
+        with self._lock:
+            # 去重：先删除同一来源的旧条目
+            sources_seen = set()
+            for chunk in chunks:
+                src = chunk.get("source", "")
+                if src and src not in sources_seen:
+                    sources_seen.add(src)
+                    removed = self._remove_by_source(src)
+                    if removed:
+                        logger.info("已清理旧数据: %s (%d 条)", src, removed)
 
-        texts = [chunk["content"] for chunk in chunks]
-        new_vectors = np.array(self.embedding.embed_batch(texts), dtype=np.float32)
+            texts = [chunk["content"] for chunk in chunks]
+            new_vectors = np.array(self.embedding.embed_batch(texts), dtype=np.float32)
 
-        if self._vectors is None or len(self._vectors) == 0:
-            self._vectors = new_vectors
-        else:
-            self._vectors = np.vstack([self._vectors, new_vectors])
+            if self._vectors is None or len(self._vectors) == 0:
+                self._vectors = new_vectors
+            else:
+                self._vectors = np.vstack([self._vectors, new_vectors])
 
-        for chunk in chunks:
-            self._documents.append(chunk["content"])
-            self._sources.append(chunk["source"])
-            self._indices.append(chunk["index"])
+            for chunk in chunks:
+                self._documents.append(chunk["content"])
+                self._sources.append(chunk["source"])
+                self._indices.append(chunk["index"])
 
-        self._save()
+            self._save()
+
         return len(chunks)
 
-    # === 语义检索 ===
+    # === 语义检索（只读，无需锁）===
 
-    def search(self, query: str, top_k: int = RETRIEVAL_TOP_K, min_score: float = MIN_RELEVANCE_SCORE) -> list[dict]:
+    def search(self, query: str, top_k: int = RETRIEVAL_TOP_K,
+               min_score: float = MIN_RELEVANCE_SCORE) -> list[dict]:
         """语义检索：输入问题，返回最相关的文档片段。
 
         Returns:
@@ -140,7 +156,7 @@ class Retriever:
         similarities = np.dot(v_norms, q_norm)
 
         # Top-K（先取更多候选再按阈值过滤）
-        k = min(top_k * 2, len(similarities))  # 多取一些候选
+        k = min(top_k * 2, len(similarities))
         top_indices = np.argpartition(similarities, -k)[-k:]
         top_indices = top_indices[np.argsort(similarities[top_indices])[::-1]]
 
@@ -148,7 +164,7 @@ class Retriever:
         for idx in top_indices:
             sim = float(similarities[idx])
             if sim < min_score:
-                continue  # 跳过低相关度结果
+                continue
             formatted.append({
                 "content": self._documents[idx],
                 "source": self._sources[idx],

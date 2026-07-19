@@ -1,28 +1,6 @@
 """图谱查询工具 —— 执行只读 Cypher 查询，查询 Neo4j 水稻知识图谱。"""
 from langchain_core.tools import tool
-from neo4j import GraphDatabase
-from backend.config import NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD
-import re
-
-# 模块级单例
-_driver = None
-
-
-def get_driver():
-    global _driver
-    if _driver is None:
-        _driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
-    return _driver
-
-
-def _is_read_only(cypher: str) -> bool:
-    """安全检查：只允许只读 MATCH 语句。"""
-    cypher_upper = cypher.strip().upper()
-    forbidden = ["CREATE ", "DELETE ", "SET ", "MERGE ", "REMOVE ", "DROP ", "DETACH "]
-    for kw in forbidden:
-        if cypher_upper.startswith(kw) or f"\n{kw}" in cypher_upper:
-            return False
-    return "MATCH" in cypher_upper
+from backend.kg.driver import get_driver, _is_read_only
 
 
 @tool
@@ -47,8 +25,11 @@ def graph_query(cypher: str) -> dict:
     if not _is_read_only(cypher):
         return {"nodes": [], "relationships": [], "error": "安全限制：仅允许 MATCH 只读查询"}
 
+    driver = get_driver()
+    if driver is None:
+        return {"nodes": [], "relationships": [], "error": "Neo4j 未连接"}
+
     try:
-        driver = get_driver()
         with driver.session() as session:
             result = session.run(cypher)
             records = list(result)
@@ -61,7 +42,6 @@ def graph_query(cypher: str) -> dict:
             for record in records:
                 for value in record.values():
                     if hasattr(value, "labels") and hasattr(value, "id"):
-                        # 是节点
                         node_id = value.id
                         if node_id not in seen_nodes:
                             seen_nodes.add(node_id)
@@ -71,7 +51,6 @@ def graph_query(cypher: str) -> dict:
                                 "properties": dict(value.items()),
                             })
                     elif hasattr(value, "type") and hasattr(value, "id"):
-                        # 是关系
                         rel_id = value.id
                         if rel_id not in seen_rels:
                             seen_rels.add(rel_id)

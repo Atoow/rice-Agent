@@ -1,15 +1,25 @@
-"""向量检索工具 —— 复用现有 Retriever，包装为 LangChain Tool。"""
+"""向量检索工具 —— 包装为 LangChain Tool。
+
+通过 set_retriever() 注入与 admin 模块共享的 Retriever 实例，
+确保文档上传后 agent 检索能感知新数据。
+"""
 from langchain_core.tools import tool
 from backend.rag.embedding import OllamaEmbedding
 from backend.rag.retriever import Retriever
-from backend.config import RETRIEVAL_TOP_K, MIN_RELEVANCE_SCORE
+from backend.config import RETRIEVAL_TOP_K
 
-# 模块级单例
+# 模块级单例（优先使用外部注入的实例）
 _retriever: Retriever | None = None
 
 
+def set_retriever(retriever: Retriever) -> None:
+    """注入共享 Retriever 实例（由 lifespan 调用）。"""
+    global _retriever
+    _retriever = retriever
+
+
 def get_retriever() -> Retriever:
-    """获取或初始化全局 Retriever 实例。"""
+    """获取 Retriever 实例（优先返回注入的，否则自建）。"""
     global _retriever
     if _retriever is None:
         embedding = OllamaEmbedding()
@@ -33,7 +43,6 @@ def vector_search(query: str, top_k: int = RETRIEVAL_TOP_K) -> list[dict]:
     """
     retriever = get_retriever()
     results = retriever.search(query, top_k=top_k)
-    # 不截断内容，让 LLM 看到完整上下文
     return [
         {"content": r["content"], "source": r["source"], "relevance": r["relevance"]}
         for r in results

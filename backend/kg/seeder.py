@@ -212,6 +212,7 @@ def extract_from_documents(doc_text: str) -> list[dict]:
     Returns:
         提取的病虫害数据结构列表
     """
+    import asyncio
     llm = create_llm_provider()
     prompt = f"""从以下水稻种植文档中提取病虫害信息，以 JSON 格式返回。
 
@@ -228,7 +229,7 @@ def extract_from_documents(doc_text: str) -> list[dict]:
 [{{"disease": {{...}}, "symptoms": [{{...}}], "controls": [{{...}}], "env_triggers": [{{...}}]}}]
 """
 
-    response = llm.generate([{"role": "user", "content": prompt}])
+    response = asyncio.run(llm.generate([{"role": "user", "content": prompt}]))
     # 简单解析（实际可用 json.loads 提取）
     try:
         start = response.find("[")

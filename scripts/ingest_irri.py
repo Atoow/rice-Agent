@@ -32,6 +32,7 @@ from backend.llm.factory import create_llm_provider
 
 def _extract_kg_entities(article: dict) -> dict | None:
     """用 LLM 从单篇 IRRI 文章提取图谱实体。"""
+    import asyncio
     llm = create_llm_provider()
     title = article.get("title", "")
     content = article.get("content", "")[:2500]
@@ -68,7 +69,7 @@ def _extract_kg_entities(article: dict) -> dict | None:
 只提取明确的病害/虫害实体。"""
 
     try:
-        response = llm.generate([{"role": "user", "content": prompt}])
+        response = asyncio.run(llm.generate([{"role": "user", "content": prompt}]))
         # 解析 JSON
         start = response.find("{")
         end = response.rfind("}") + 1
@@ -171,12 +172,11 @@ def import_to_neo4j(articles: list[dict], dry_run: bool = False):
             # 品种抗性
             for v in entity.get("susceptible_varieties", []):
                 if v:
-                    builder.upsert_variety(v, False, "")
-                    # SUSCEPTIBLE_TO 关系
+                    builder.upsert_variety(v, [], "")
+                    # SUSCEPTIBLE_TO 关系未在 builder 中实现，跳过
             for v in entity.get("resistant_varieties", []):
                 if v:
-                    builder.upsert_variety(v, True, "")
-                    # RESISTANT_TO 关系
+                    builder.upsert_variety(v, [disease_name], "")
 
             # 生育期
             for stage in entity.get("growth_stages", []):

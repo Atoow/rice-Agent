@@ -1,9 +1,6 @@
 """Agent 状态图集成测试 —— 验证图结构、路由逻辑。
 
-策略：
-- graph_builds_successfully：使用 AST 静态分析验证图结构（langgraph 不可用时）
-- 初始状态测试：直接导入 state.py（无 langgraph 依赖）
-- 路由函数测试：通过 AST 提取函数 + 提供缺失的类型定义（AgentState）来 exec
+当前图为 ReAct 模式（3 节点: intent_route / react_agent / execute_tools）。
 """
 import ast
 import textwrap
@@ -14,8 +11,12 @@ from backend.agent.state import initial_state, AgentState
 class TestAgentGraph:
 
     def test_graph_builds_successfully(self):
-        """通过 AST 验证图构建逻辑 —— 确认 7 个节点和入口点。"""
-        with open("backend/agent/graph.py") as f:
+        """通过 AST 验证图构建逻辑 —— 确认 ReAct 模式 3 个节点和入口点。"""
+        import os
+        graph_path = os.path.join(
+            os.path.dirname(os.path.dirname(__file__)), "agent", "graph.py"
+        )
+        with open(graph_path, encoding="utf-8") as f:
             tree = ast.parse(f.read())
 
         # 检查 add_node 调用
@@ -26,16 +27,12 @@ class TestAgentGraph:
                     if node.args and isinstance(node.args[0], ast.Constant):
                         add_node_calls.append(node.args[0].value)
 
-        # 验证至少有 7 个节点
-        assert len(add_node_calls) >= 7, (
-            f"Expected >=7 add_node calls, got {len(add_node_calls)}"
+        # 当前 ReAct 模式有 3 个节点
+        assert len(add_node_calls) == 3, (
+            f"Expected 3 add_node calls, got {len(add_node_calls)}: {add_node_calls}"
         )
 
-        # 验证节点名称
-        expected_nodes = {
-            "intent_route", "collect_info", "check_confidence",
-            "clarify", "verify_claim", "generate_plan", "knowledge_answer"
-        }
+        expected_nodes = {"intent_route", "react_agent", "execute_tools"}
         for expected in expected_nodes:
             assert expected in add_node_calls, (
                 f"Missing node '{expected}' in graph.add_node calls"
@@ -57,7 +54,8 @@ class TestAgentGraph:
         state = initial_state()
         required = ["messages", "intent", "symptoms", "candidate_diseases",
                      "confidence", "missing_info", "clarify_count",
-                     "final_diagnosis", "sources", "verification_result", "node_events"]
+                     "final_diagnosis", "sources", "verification_result", "node_events",
+                     "pending_action", "pending_observation", "react_loops"]
         for key in required:
             assert key in state, f"Missing field: {key}"
 
@@ -87,16 +85,19 @@ class TestAgentGraph:
 
 
 class TestGraphRouting:
-    """路由函数测试 —— AST 提取 + exec 执行路由函数。"""
+    """路由函数测试 —— 从 graph.py AST 提取路由函数并执行。"""
 
     @classmethod
     def setup_class(cls):
-        """从 graph.py 源码中提取路由函数，提供 AgentState 定义。"""
-        with open("backend/agent/graph.py") as f:
+        """从 graph.py 源码中提取路由函数。"""
+        import os
+        graph_path = os.path.join(
+            os.path.dirname(os.path.dirname(__file__)), "agent", "graph.py"
+        )
+        with open(graph_path, encoding="utf-8") as f:
             source = f.read()
         tree = ast.parse(source)
 
-        # 提取所有以 route_ 开头的函数源码
         cls.route_funcs = {}
         for node in ast.iter_child_nodes(tree):
             if isinstance(node, ast.FunctionDef) and node.name.startswith("route_"):
@@ -110,13 +111,13 @@ class TestGraphRouting:
         route = self.route_funcs["route_after_intent"]
         state = initial_state()
         state["intent"] = "diagnose"
-        assert route(state) == "collect_info"
+        assert route(state) == "react_agent"
 
     def test_route_after_intent_knowledge(self):
         route = self.route_funcs["route_after_intent"]
         state = initial_state()
         state["intent"] = "knowledge"
-        assert route(state) == "knowledge_answer"
+        assert route(state) == "react_agent"
 
     def test_route_after_intent_chitchat(self):
         route = self.route_funcs["route_after_intent"]
@@ -131,32 +132,33 @@ class TestGraphRouting:
         state["intent"] = "unknown"
         assert route(state) == "chitchat_end"
 
-    def test_route_after_confidence_high(self):
-        route = self.route_funcs["route_after_confidence"]
+    def test_route_after_react_with_action(self):
+        """有 pending_action 时应该走 execute_tools。"""
+        route = self.route_funcs["route_after_react"]
         state = initial_state()
-        state["confidence"] = 0.85
-        assert route(state) == "verify_claim"
+        state["pending_action"] = {"tool": "vector_search", "tool_input": "稻瘟病"}
+        assert route(state) == "execute_tools"
 
-    def test_route_after_confidence_low_with_rounds_left(self):
-        route = self.route_funcs["route_after_confidence"]
+    def test_route_after_react_no_action(self):
+        """无 pending_action 时应该结束。"""
+        route = self.route_funcs["route_after_react"]
         state = initial_state()
-        state["confidence"] = 0.4
-        state["clarify_count"] = 1
-        assert route(state) == "clarify"
+        state["pending_action"] = None
+        assert route(state) == "end"
 
-    def test_route_after_confidence_low_max_rounds(self):
-        route = self.route_funcs["route_after_confidence"]
+    def test_route_after_react_max_loops(self):
+        """超过最大循环次数走 force_end。"""
+        route = self.route_funcs["route_after_react"]
         state = initial_state()
-        state["confidence"] = 0.4
-        state["clarify_count"] = 3
-        assert route(state) == "verify_claim"
+        state["react_loops"] = 8
+        state["pending_action"] = {"tool": "vector_search", "tool_input": "稻瘟病"}
+        assert route(state) == "force_end"
 
-    def test_route_after_confidence_high_threshold(self):
-        """边界值 0.7 应走 verify_claim。"""
-        route = self.route_funcs["route_after_confidence"]
+    def test_route_after_tools(self):
+        """工具执行后回到 react_agent。"""
+        route = self.route_funcs["route_after_tools"]
         state = initial_state()
-        state["confidence"] = 0.7
-        assert route(state) == "verify_claim"
+        assert route(state) == "react_agent"
 
 
 if __name__ == "__main__":

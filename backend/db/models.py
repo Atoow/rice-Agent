@@ -1,14 +1,33 @@
-"""SQLite 数据库：存对话历史，支持多轮对话上下文。"""
+"""SQLite 数据库：存对话历史，支持多轮对话上下文。
+
+特性：
+- WAL 模式：支持并发读写
+- 连接复用：减少频繁开关开销
+"""
 import json
+import logging
 import sqlite3
+import threading
 from datetime import datetime
 from backend.config import DATABASE_URL, MAX_HISTORY_TURNS
 
+logger = logging.getLogger(__name__)
+
+# 线程本地连接（每个线程复用同一个连接）
+_local = threading.local()
+
 
 def get_db() -> sqlite3.Connection:
-    """获取数据库连接。"""
-    conn = sqlite3.connect(DATABASE_URL)
-    conn.row_factory = sqlite3.Row
+    """获取当前线程的数据库连接（自动复用）。"""
+    conn = getattr(_local, "conn", None)
+    if conn is None:
+        conn = sqlite3.connect(DATABASE_URL)
+        conn.row_factory = sqlite3.Row
+        # 启用 WAL 模式（Write-Ahead Logging，支持并发读写）
+        conn.execute("PRAGMA journal_mode=WAL")
+        # 外键约束
+        conn.execute("PRAGMA foreign_keys=ON")
+        _local.conn = conn
     return conn
 
 
@@ -30,7 +49,7 @@ def init_db():
         ON conversations(session_id)
     """)
     conn.commit()
-    conn.close()
+    logger.info("SQLite 数据库初始化完成: %s", DATABASE_URL)
 
 
 def save_conversation(
@@ -43,7 +62,6 @@ def save_conversation(
         (session_id, role, content, json.dumps(sources, ensure_ascii=False) if sources else None),
     )
     conn.commit()
-    conn.close()
 
 
 def get_conversation_history(session_id: str) -> list[dict]:
@@ -58,5 +76,4 @@ def get_conversation_history(session_id: str) -> list[dict]:
         ) ORDER BY id ASC""",
         (session_id, MAX_HISTORY_TURNS * 2),
     ).fetchall()
-    conn.close()
     return [{"role": row["role"], "content": row["content"]} for row in rows]

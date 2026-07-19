@@ -4,12 +4,14 @@ from langgraph.checkpoint.memory import MemorySaver
 from backend.agent.state import AgentState
 from backend.agent.router import intent_route
 from backend.agent.nodes.react_agent import react_agent, execute_tools
-from backend.agent.nodes.collect import collect_info
-from backend.agent.nodes.diagnose import check_confidence
-from backend.agent.nodes.clarify import clarify
-from backend.agent.nodes.verify import verify_claim_node
-from backend.agent.nodes.generate import generate_plan, knowledge_answer
-from backend.config import CONFIDENCE_THRESHOLD, MAX_CLARIFY_ROUNDS
+from backend.config import MAX_CLARIFY_ROUNDS
+
+# 以下节点模块保留 import 但当前图未使用（预留给旧版诊断链路切换）：
+#   from backend.agent.nodes.collect import collect_info
+#   from backend.agent.nodes.diagnose import check_confidence
+#   from backend.agent.nodes.clarify import clarify
+#   from backend.agent.nodes.verify import verify_claim_node
+#   from backend.agent.nodes.generate import generate_plan, knowledge_answer
 
 
 # === 路由函数 ===

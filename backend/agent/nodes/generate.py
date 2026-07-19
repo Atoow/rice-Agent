@@ -17,6 +17,9 @@ async def generate_plan(state: AgentState) -> AgentState:
     docs = vector_search.invoke({"query": search_query, "top_k": 3})
 
     # Step 2: 图谱查询——获取病害完整画像（症状、防治、环境触发）
+    # ⚠ 安全注意：disease_name 直接拼入 Cypher 存在注入风险。
+    # 若启用此节点，需先在 graph_query 工具中添加参数化查询支持，
+    # 或使用 Neo4j 参数绑定: session.run(cypher, {"disease_name": disease_name})
     graph_context = ""
     if disease_name:
         cypher = f"""
