@@ -32,15 +32,6 @@ h1 { font-size: 22px; margin-bottom: 6px; color: #2d6a1e; }
 .back-link { display: inline-block; margin-bottom: 20px; color: #2d6a1e; text-decoration: none; font-size: 13px; }
 .back-link:hover { text-decoration: underline; }
 .empty { color: #ccc; font-size: 13px; text-align: center; padding: 14px; }
-.file-group { margin-bottom: 12px; }
-.file-group-header { font-weight: bold; font-size: 14px; color: #444; padding: 6px 0; border-bottom: 1px solid #eee; margin-bottom: 6px; }
-.file-group-header .group-count { font-weight: normal; color: #999; font-size: 12px; margin-left: 8px; }
-.file-group-header.collapsible { cursor: pointer; user-select: none; }
-.file-group-header.collapsible:hover { color: #2d6a1e; }
-.toggle-icon { float: right; font-size: 10px; color: #aaa; margin-top: 2px; }
-.file-sublist { list-style: none; padding: 0; margin: 0; }
-.file-sublist li { padding: 4px 0; font-size: 12px; color: #666; border-bottom: 1px solid #f5f5f5; word-break: break-all; }
-#irriList { display: none; }
 .batch-section { margin-top: 16px; padding-top: 14px; border-top: 1px solid #eee; }
 #batchProgress { margin-top: 8px; font-size: 12px; color: #888; max-height: 120px; overflow-y: auto; }
 #batchProgress .ok { color: #2d6a1e; }
@@ -97,45 +88,13 @@ async function loadStats() {
     const list = document.getElementById('fileList');
     if (files.length === 0) {
       list.innerHTML = '<div class="empty">暂无文档，请上传第一个知识文档</div>';
-      return;
+    } else {
+      list.innerHTML = files.map(f => '<li>' + f + '</li>').join('');
     }
-
-    const local = files.filter(f => !f.startsWith('IRRI:'));
-    const irri = files.filter(f => f.startsWith('IRRI:'));
-
-    let html = '';
-
-    // 本地文档 (始终展开)
-    if (local.length) {
-      html += '<div class="file-group"><div class="file-group-header">📁 本地文档 <span class="group-count">' + local.length + ' 个</span></div><ul class="file-sublist">';
-      html += local.map(f => '<li>' + f + '</li>').join('');
-      html += '</ul></div>';
-    }
-
-    // IRRI (可折叠)
-    if (irri.length) {
-      html += '<div class="file-group"><div class="file-group-header collapsible" onclick="toggleIRRI()">📁 IRRI 知识库 <span class="group-count">' + irri.length + ' 篇</span><span class="toggle-icon">▼</span></div><ul class="file-sublist" id="irriList">';
-      html += irri.map(f => '<li>' + f.replace('IRRI: ', '') + '</li>').join('');
-      html += '</ul></div>';
-    }
-
-    list.innerHTML = html;
   } catch (e) {
     document.getElementById('chunksCount').textContent = '?';
     document.getElementById('docsCount').textContent = '?';
     document.getElementById('fileList').innerHTML = '<div class="empty">无法连接服务，请确认后端已启动（http://localhost:8000）</div>';
-  }
-}
-
-function toggleIRRI() {
-  const el = document.getElementById('irriList');
-  const icon = document.querySelector('.toggle-icon');
-  if (el.style.display === 'none') {
-    el.style.display = 'block';
-    icon.textContent = '▼';
-  } else {
-    el.style.display = 'none';
-    icon.textContent = '▶';
   }
 }
 
@@ -209,7 +168,7 @@ async function batchUpload() {
       const res = await fetch('/admin/upload', { method: 'POST', body: form });
       const data = await res.json();
       if (data.status === 'ok') {
-        line.textContent = '✅ ' + (i+1) + '/' + batchFiles.length + ' ' + f.name + ' (' + data.chunks + ' chunks)';
+        line.textContent = '✅ ' + (i+1) + '/' + batchFiles.length + ' ' + f.name + ' (' + data.chunks + ' 片段)';
         line.className = 'ok';
         ok++;
       } else {
@@ -218,7 +177,7 @@ async function batchUpload() {
         fail++;
       }
     } catch(e) {
-      line.textContent = '❌ ' + (i+1) + '/' + batchFiles.length + ' ' + f.name + ': network error';
+      line.textContent = '❌ ' + (i+1) + '/' + batchFiles.length + ' ' + f.name + ': 网络错误';
       line.className = 'fail';
       fail++;
     }
